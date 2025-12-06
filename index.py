@@ -10,18 +10,21 @@ import os
 import re
 import webbrowser
 import tempfile
+import subprocess
+import sys
 
 class WebContentExtractor:
     def __init__(self):
         self.images_list = []
         self.videos_list = []
+        self.current_html = ""
         self.root = None
         self.setup_ui()
     
     def setup_ui(self):
         self.root = tk.Tk()
-        self.root.title("网页内容提取器 v3.0")
-        self.root.geometry("1100x850")
+        self.root.title("网页内容提取器 v3.5")
+        self.root.geometry("1200x900")
         
         frame = ttk.Frame(self.root, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
@@ -29,23 +32,32 @@ class WebContentExtractor:
         url_label = ttk.Label(frame, text="网页URL:")
         url_label.pack(anchor=tk.W)
         
-        self.url_entry = ttk.Entry(frame, width=80)
-        self.url_entry.pack(pady=5)
+        url_frame = ttk.Frame(frame)
+        url_frame.pack(fill=tk.X, pady=5)
         
-        button_frame = ttk.Frame(frame)
-        button_frame.pack(pady=5)
+        self.url_entry = ttk.Entry(url_frame, width=80)
+        self.url_entry.pack(side=tk.LEFT)
         
-        fetch_button = ttk.Button(button_frame, text="获取网页内容", command=self.fetch_webpage)
+        fetch_button = ttk.Button(url_frame, text="获取网页内容", command=self.fetch_webpage)
         fetch_button.pack(side=tk.LEFT, padx=5)
         
-        download_video_button = ttk.Button(button_frame, text="下载选中视频", command=self.download_video)
-        download_video_button.pack(side=tk.LEFT, padx=5)
+        html_buttons_frame = ttk.Frame(frame)
+        html_buttons_frame.pack(fill=tk.X, pady=5)
+        
+        save_html_button = ttk.Button(html_buttons_frame, text="保存HTML到html.txt", command=self.save_html_to_file)
+        save_html_button.pack(side=tk.LEFT, padx=5)
+        
+        open_editor_button = ttk.Button(html_buttons_frame, text="用html_edit.py打开html.txt", command=self.open_html_in_editor)
+        open_editor_button.pack(side=tk.LEFT, padx=5)
         
         notebook = ttk.Notebook(frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=10)
         
         text_frame = self.create_text_tab(notebook)
         notebook.add(text_frame, text="网页文字")
+        
+        html_frame = self.create_html_tab(notebook)
+        notebook.add(html_frame, text="HTML源码")
         
         image_frame = self.create_image_tab(notebook)
         notebook.add(image_frame, text="图片列表")
@@ -68,6 +80,19 @@ class WebContentExtractor:
         text_scroll.config(command=self.text_display.yview)
         
         return text_frame
+    
+    def create_html_tab(self, notebook):
+        html_frame = ttk.Frame(notebook)
+        
+        html_scroll = ttk.Scrollbar(html_frame)
+        html_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.html_display = tk.Text(html_frame, height=20, wrap=tk.NONE, yscrollcommand=html_scroll.set)
+        self.html_display.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.html_display.config(state=tk.DISABLED)
+        html_scroll.config(command=self.html_display.yview)
+        
+        return html_frame
     
     def create_image_tab(self, notebook):
         image_frame = ttk.Frame(notebook)
@@ -109,6 +134,9 @@ class WebContentExtractor:
         copy_button = ttk.Button(button_frame, text="复制视频链接", command=self.copy_video_url)
         copy_button.pack(side=tk.LEFT, padx=5)
         
+        download_button = ttk.Button(button_frame, text="下载选中视频", command=self.download_video)
+        download_button.pack(side=tk.LEFT, padx=5)
+        
         return video_frame
     
     def fetch_webpage(self):
@@ -129,6 +157,7 @@ class WebContentExtractor:
             response.raise_for_status()
             response.encoding = response.apparent_encoding
             
+            self.current_html = response.text
             soup = BeautifulSoup(response.content, 'html.parser')
             
             self._extract_text_content(soup)
@@ -138,6 +167,8 @@ class WebContentExtractor:
             self.root.after(0, lambda: self.status_label.config(
                 text=f"加载完成。找到 {len(self.images_list)} 张图片，{len(self.videos_list)} 个视频"
             ))
+            
+            self.root.after(0, self._update_html_display)
             
         except requests.exceptions.RequestException as e:
             error_msg = str(e)
@@ -161,6 +192,49 @@ class WebContentExtractor:
         self.text_display.delete(1.0, tk.END)
         self.text_display.insert(1.0, text)
         self.text_display.config(state=tk.DISABLED)
+    
+    def _update_html_display(self):
+        self.html_display.config(state=tk.NORMAL)
+        self.html_display.delete(1.0, tk.END)
+        
+        if len(self.current_html) > 50000:
+            self.html_display.insert(1.0, self.current_html[:50000] + "\n\n... (内容过长，已截断)")
+        else:
+            self.html_display.insert(1.0, self.current_html)
+        
+        self.html_display.config(state=tk.DISABLED)
+    
+    def save_html_to_file(self):
+        if not self.current_html:
+            messagebox.showwarning("警告", "请先获取网页内容")
+            return
+        
+        try:
+            with open("html.txt", "w", encoding="utf-8") as f:
+                f.write(self.current_html)
+            self.status_label.config(text="HTML已保存到 html.txt")
+            messagebox.showinfo("成功", "HTML代码已保存到 html.txt")
+        except Exception as e:
+            error_msg = str(e)
+            self.status_label.config(text=f"保存失败: {error_msg}")
+            messagebox.showerror("错误", f"保存失败: {error_msg}")
+    
+    def open_html_in_editor(self):
+        if not os.path.exists("html.txt"):
+            messagebox.showwarning("警告", "未找到 html.txt 文件，请先保存HTML")
+            return
+        
+        if not os.path.exists("html_edit.py"):
+            messagebox.showwarning("警告", "未找到 html_edit.py 编辑器文件")
+            return
+        
+        try:
+            subprocess.Popen([sys.executable, "html_edit.py", "html.txt"])
+            self.status_label.config(text="正在打开HTML编辑器...")
+        except Exception as e:
+            error_msg = str(e)
+            self.status_label.config(text=f"打开编辑器失败: {error_msg}")
+            messagebox.showerror("错误", f"打开编辑器失败: {error_msg}")
     
     def _extract_image_info(self, soup, base_url):
         self.images_list = []
