@@ -9,15 +9,12 @@ import threading
 import os
 import re
 import webbrowser
-import pygame
 import tempfile
-import time
 
 class WebContentExtractor:
     def __init__(self):
         self.images_list = []
         self.videos_list = []
-        self.video_player = None
         self.root = None
         self.setup_ui()
     
@@ -58,8 +55,6 @@ class WebContentExtractor:
         
         self.status_label = ttk.Label(frame, text="就绪")
         self.status_label.pack(pady=5)
-        
-        pygame.init()
     
     def create_text_tab(self, notebook):
         text_frame = ttk.Frame(notebook)
@@ -108,11 +103,11 @@ class WebContentExtractor:
         button_frame = ttk.Frame(video_frame)
         button_frame.pack(pady=5)
         
-        preview_button = ttk.Button(button_frame, text="内嵌播放MP4", command=self.play_video_embedded)
+        preview_button = ttk.Button(button_frame, text="播放MP4视频", command=self.play_video_external)
         preview_button.pack(side=tk.LEFT, padx=5)
         
-        external_button = ttk.Button(button_frame, text="外部播放器", command=self.play_video_external)
-        external_button.pack(side=tk.LEFT, padx=5)
+        copy_button = ttk.Button(button_frame, text="复制视频链接", command=self.copy_video_url)
+        copy_button.pack(side=tk.LEFT, padx=5)
         
         return video_frame
     
@@ -145,9 +140,11 @@ class WebContentExtractor:
             ))
             
         except requests.exceptions.RequestException as e:
-            self.root.after(0, lambda: self.status_label.config(text=f"网络请求错误: {e}"))
+            error_msg = str(e)
+            self.root.after(0, lambda msg=error_msg: self.status_label.config(text=f"网络请求错误: {msg}"))
         except Exception as e:
-            self.root.after(0, lambda: self.status_label.config(text=f"发生错误: {e}"))
+            error_msg = str(e)
+            self.root.after(0, lambda msg=error_msg: self.status_label.config(text=f"发生错误: {msg}"))
     
     def _extract_text_content(self, soup):
         for script in soup(["script", "style", "noscript"]):
@@ -289,11 +286,13 @@ class WebContentExtractor:
                     text=f"图片加载完成: {img_alt[:30]}"
                 ))
             else:
-                self.root.after(0, lambda: self.status_label.config(
-                    text=f"加载图片失败: HTTP {img_response.status_code}"
+                status_code = img_response.status_code
+                self.root.after(0, lambda code=status_code: self.status_label.config(
+                    text=f"加载图片失败: HTTP {code}"
                 ))
         except Exception as e:
-            self.root.after(0, lambda: self.status_label.config(text=f"加载图片失败: {e}"))
+            error_msg = str(e)
+            self.root.after(0, lambda msg=error_msg: self.status_label.config(text=f"加载图片失败: {msg}"))
     
     def _create_image_window(self, img, img_url, img_alt):
         img_window = tk.Toplevel(self.root)
@@ -366,8 +365,10 @@ class WebContentExtractor:
                         
                         if total_size > 0:
                             progress = (downloaded / total_size) * 100
-                            self.root.after(0, lambda: self.status_label.config(
-                                text=f"下载进度: {progress:.1f}% ({downloaded//1024}KB/{total_size//1024}KB)"
+                            downloaded_kb = downloaded // 1024
+                            total_kb = total_size // 1024
+                            self.root.after(0, lambda p=progress, d=downloaded_kb, t=total_kb: self.status_label.config(
+                                text=f"下载进度: {p:.1f}% ({d}KB/{t}KB)"
                             ))
             
             self.root.after(0, lambda: self.status_label.config(
@@ -376,107 +377,13 @@ class WebContentExtractor:
             self.root.after(0, lambda: messagebox.showinfo("成功", f"视频已保存到: {file_path}"))
             
         except requests.exceptions.RequestException as e:
-            self.root.after(0, lambda: self.status_label.config(text=f"视频下载失败: {e}"))
-            self.root.after(0, lambda: messagebox.showerror("错误", f"下载失败: {e}"))
+            error_msg = str(e)
+            self.root.after(0, lambda msg=error_msg: self.status_label.config(text=f"视频下载失败: {msg}"))
+            self.root.after(0, lambda msg=error_msg: messagebox.showerror("错误", f"下载失败: {msg}"))
         except Exception as e:
-            self.root.after(0, lambda: self.status_label.config(text=f"视频下载失败: {e}"))
-            self.root.after(0, lambda: messagebox.showerror("错误", f"下载失败: {e}"))
-    
-    def play_video_embedded(self):
-        selection = self.video_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("警告", "请先选择一个视频")
-            return
-        
-        idx = selection[0]
-        if idx >= len(self.videos_list):
-            messagebox.showerror("错误", "视频索引错误")
-            return
-        
-        video_url, title, vtype = self.videos_list[idx]
-        
-        if vtype in ['youtube', 'bilibili', 'vimeo']:
-            choice = messagebox.askyesno("在线视频", "这是在线视频，是否在浏览器中打开？")
-            if choice:
-                webbrowser.open(video_url)
-            return
-        
-        self.status_label.config(text=f"正在加载视频: {title[:30]}...")
-        threading.Thread(target=self._play_video_embedded_thread, args=(video_url, title)).start()
-    
-    def _play_video_embedded_thread(self, video_url, title):
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': self.url_entry.get()
-            }
-            
-            response = requests.get(video_url, headers=headers, stream=True, timeout=30)
-            response.raise_for_status()
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
-                tmp.write(response.content)
-                temp_file = tmp.name
-            
-            self.root.after(0, self._create_video_player_window, temp_file, title)
-            
-        except Exception as e:
-            self.root.after(0, lambda: self.status_label.config(text=f"视频加载失败: {e}"))
-    
-    def _create_video_player_window(self, video_file, title):
-        if self.video_player and self.video_player.winfo_exists():
-            self.video_player.destroy()
-        
-        self.video_player = tk.Toplevel(self.root)
-        self.video_player.title(f"视频播放器 - {title[:50]}")
-        self.video_player.geometry("800x600")
-        
-        control_frame = ttk.Frame(self.video_player)
-        control_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        self.play_button = ttk.Button(control_frame, text="播放", command=lambda: self._play_pygame_video(video_file))
-        self.play_button.pack(side=tk.LEFT, padx=5)
-        
-        self.pause_button = ttk.Button(control_frame, text="暂停", command=self._pause_pygame_video)
-        self.pause_button.pack(side=tk.LEFT, padx=5)
-        
-        self.stop_button = ttk.Button(control_frame, text="停止", command=self._stop_pygame_video)
-        self.stop_button.pack(side=tk.LEFT, padx=5)
-        
-        self.volume_scale = ttk.Scale(control_frame, from_=0, to=100, orient=tk.HORIZONTAL)
-        self.volume_scale.set(50)
-        self.volume_scale.pack(side=tk.LEFT, padx=20)
-        self.volume_scale.bind("<ButtonRelease-1>", lambda e: self._update_volume())
-        
-        volume_label = ttk.Label(control_frame, text="音量:")
-        volume_label.pack(side=tk.LEFT)
-        
-        self.video_label = tk.Label(self.video_player, bg='black')
-        self.video_label.pack(fill=tk.BOTH, expand=True)
-        
-        self.root.after(0, lambda: self.status_label.config(text=f"视频已加载: {title[:30]}"))
-    
-    def _play_pygame_video(self, video_file):
-        try:
-            pygame.mixer.music.load(video_file)
-            pygame.mixer.music.play()
-            
-            info = tk.Label(self.video_player, text="音频播放中 (视频文件)")
-            info.pack()
-            
-        except Exception as e:
-            messagebox.showerror("播放错误", f"无法播放视频: {e}")
-    
-    def _pause_pygame_video(self):
-        if pygame.mixer.music.get_busy():
-            pygame.mixer.music.pause()
-    
-    def _stop_pygame_video(self):
-        pygame.mixer.music.stop()
-    
-    def _update_volume(self):
-        volume = self.volume_scale.get() / 100
-        pygame.mixer.music.set_volume(volume)
+            error_msg = str(e)
+            self.root.after(0, lambda msg=error_msg: self.status_label.config(text=f"视频下载失败: {msg}"))
+            self.root.after(0, lambda msg=error_msg: messagebox.showerror("错误", f"下载失败: {msg}"))
     
     def play_video_external(self):
         selection = self.video_listbox.curselection()
@@ -499,11 +406,28 @@ class WebContentExtractor:
                 webbrowser.open(video_url)
                 self.status_label.config(text=f"正在尝试播放视频: {title[:30]}")
             except Exception as e:
-                self.status_label.config(text=f"无法打开视频: {e}")
+                error_msg = str(e)
+                self.status_label.config(text=f"无法打开视频: {error_msg}")
+    
+    def copy_video_url(self):
+        selection = self.video_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("警告", "请先选择一个视频")
+            return
+        
+        idx = selection[0]
+        if idx >= len(self.videos_list):
+            messagebox.showerror("错误", "视频索引错误")
+            return
+        
+        video_url, title, vtype = self.videos_list[idx]
+        self.root.clipboard_clear()
+        self.root.clipboard_append(video_url)
+        self.status_label.config(text=f"已复制视频链接: {title[:30]}")
+        messagebox.showinfo("成功", "视频链接已复制到剪贴板")
     
     def run(self):
         self.root.mainloop()
-        pygame.quit()
 
 def main():
     app = WebContentExtractor()
