@@ -1,2 +1,3 @@
-# py-to-res
-依赖pip install requests beautifulsoup4
+# Py-To-Res （意义不明）
+**依赖**
+`pip install requests beautifulsoup4`
