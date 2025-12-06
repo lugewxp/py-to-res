@@ -1,39 +1,25 @@
-# web_element_editor_pyqt5.py
+# html_editor_direct.py
 import sys
-import json
+import os
+import re
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 
 class WebElement:
-    def __init__(self, tag, content="", attributes=None, children=None):
+    def __init__(self, tag="", content="", attributes=None, children=None):
         self.tag = tag
         self.content = content
         self.attributes = attributes or {}
         self.children = children or []
     
-    def to_dict(self):
-        return {
-            "tag": self.tag,
-            "content": self.content,
-            "attributes": self.attributes,
-            "children": [child.to_dict() for child in self.children]
-        }
-    
-    @staticmethod
-    def from_dict(data):
-        element = WebElement(
-            data["tag"],
-            data.get("content", ""),
-            data.get("attributes", {})
-        )
-        element.children = [WebElement.from_dict(child) for child in data.get("children", [])]
-        return element
-    
     def to_html(self, indent=0):
         indent_str = "  " * indent
         attrs = " ".join([f'{k}="{v}"' for k, v in self.attributes.items()])
         attr_str = f" {attrs}" if attrs else ""
+        
+        if self.tag == "text":
+            return indent_str + self.content
         
         if self.children:
             children_html = "\n".join([child.to_html(indent + 1) for child in self.children])
@@ -43,6 +29,172 @@ class WebElement:
         else:
             return f"{indent_str}<{self.tag}{attr_str} />"
 
+class HTMLParser:
+    def __init__(self):
+        self.current_index = 0
+        self.html = ""
+    
+    def parse(self, html_content):
+        """解析HTML字符串为元素树"""
+        self.html = html_content
+        self.current_index = 0
+        elements = []
+        
+        while self.current_index < len(self.html):
+            # 跳过空白字符
+            if self.html[self.current_index].isspace():
+                self.current_index += 1
+                continue
+            
+            # 检查是否是注释
+            if self.html.startswith("<!--", self.current_index):
+                end_index = self.html.find("-->", self.current_index)
+                if end_index != -1:
+                    self.current_index = end_index + 3
+                continue
+            
+            # 检查是否是标签
+            if self.html[self.current_index] == '<':
+                element = self.parse_element()
+                if element:
+                    elements.append(element)
+            else:
+                # 文本节点
+                text = self.parse_text()
+                if text.strip():
+                    text_element = WebElement("text", text.strip())
+                    elements.append(text_element)
+        
+        return elements
+    
+    def parse_element(self):
+        """解析单个HTML元素"""
+        if self.current_index >= len(self.html) or self.html[self.current_index] != '<':
+            return None
+        
+        # 检查是否是结束标签
+        if self.html[self.current_index + 1] == '/':
+            # 跳过结束标签
+            end_bracket = self.html.find('>', self.current_index)
+            if end_bracket != -1:
+                self.current_index = end_bracket + 1
+            return None
+        
+        # 解析开始标签
+        self.current_index += 1  # 跳过 '<'
+        
+        # 获取标签名
+        tag_end = self.current_index
+        while tag_end < len(self.html) and not self.html[tag_end].isspace() and self.html[tag_end] != '>' and self.html[tag_end] != '/':
+            tag_end += 1
+        
+        tag = self.html[self.current_index:tag_end]
+        self.current_index = tag_end
+        
+        # 解析属性
+        attributes = {}
+        while self.current_index < len(self.html) and self.html[self.current_index] != '>' and self.html[self.current_index] != '/':
+            # 跳过空白
+            if self.html[self.current_index].isspace():
+                self.current_index += 1
+                continue
+            
+            # 解析属性名
+            attr_start = self.current_index
+            while (self.current_index < len(self.html) and 
+                   not self.html[self.current_index].isspace() and 
+                   self.html[self.current_index] != '=' and 
+                   self.html[self.current_index] != '>' and 
+                   self.html[self.current_index] != '/'):
+                self.current_index += 1
+            
+            attr_name = self.html[attr_start:self.current_index]
+            
+            if self.current_index < len(self.html) and self.html[self.current_index] == '=':
+                self.current_index += 1  # 跳过 '='
+                
+                # 跳过空白
+                while self.current_index < len(self.html) and self.html[self.current_index].isspace():
+                    self.current_index += 1
+                
+                # 解析属性值
+                quote_char = self.html[self.current_index] if self.html[self.current_index] in ('"', "'") else None
+                if quote_char:
+                    self.current_index += 1  # 跳过引号
+                    attr_start = self.current_index
+                    while (self.current_index < len(self.html) and 
+                           self.html[self.current_index] != quote_char):
+                        self.current_index += 1
+                    attr_value = self.html[attr_start:self.current_index]
+                    self.current_index += 1  # 跳过结束引号
+                else:
+                    # 没有引号的属性值
+                    attr_start = self.current_index
+                    while (self.current_index < len(self.html) and 
+                           not self.html[self.current_index].isspace() and 
+                           self.html[self.current_index] != '>' and 
+                           self.html[self.current_index] != '/'):
+                        self.current_index += 1
+                    attr_value = self.html[attr_start:self.current_index]
+                
+                attributes[attr_name] = attr_value
+        
+        # 检查是否是自闭合标签
+        is_self_closing = False
+        if self.current_index < len(self.html) and self.html[self.current_index] == '/':
+            is_self_closing = True
+            self.current_index += 1
+        
+        # 跳过 '>'
+        if self.current_index < len(self.html) and self.html[self.current_index] == '>':
+            self.current_index += 1
+        
+        element = WebElement(tag, "", attributes)
+        
+        # 如果不是自闭合标签，解析子元素
+        if not is_self_closing and tag.lower() not in ["br", "hr", "img", "input", "meta", "link"]:
+            # 解析内容直到遇到结束标签
+            children = []
+            
+            while self.current_index < len(self.html):
+                # 检查是否是结束标签
+                if (self.current_index + 1 < len(self.html) and 
+                    self.html[self.current_index] == '<' and 
+                    self.html[self.current_index + 1] == '/'):
+                    
+                    # 检查是否是我们当前标签的结束标签
+                    end_tag_start = self.current_index + 2
+                    end_tag_end = self.html.find('>', end_tag_start)
+                    if end_tag_end != -1:
+                        end_tag = self.html[end_tag_start:end_tag_end].strip()
+                        if end_tag.lower() == tag.lower():
+                            self.current_index = end_tag_end + 1  # 跳过结束标签
+                            break
+                
+                # 解析子元素
+                if self.html[self.current_index] == '<':
+                    child = self.parse_element()
+                    if child:
+                        children.append(child)
+                else:
+                    text = self.parse_text()
+                    if text.strip():
+                        text_element = WebElement("text", text.strip())
+                        children.append(text_element)
+            
+            element.children = children
+        
+        return element
+    
+    def parse_text(self):
+        """解析文本内容"""
+        start_index = self.current_index
+        while (self.current_index < len(self.html) and 
+               self.html[self.current_index] != '<'):
+            self.current_index += 1
+        
+        return self.html[start_index:self.current_index]
+
 class ElementItem(QTreeWidgetItem):
     def __init__(self, element):
         super().__init__()
@@ -50,23 +202,30 @@ class ElementItem(QTreeWidgetItem):
         self.update_text()
     
     def update_text(self):
-        attrs = ", ".join([f"{k}: {v}" for k, v in self.element.attributes.items()])
-        text = f"<{self.element.tag}>"
-        if attrs:
-            text += f" ({attrs})"
-        if self.element.content:
-            text += f": {self.element.content[:30]}..."
+        if self.element.tag == "text":
+            text = f"[文本]: {self.element.content[:50]}..."
+            if len(self.element.content) > 50:
+                text += "..."
+        else:
+            attrs = ", ".join([f"{k}: {v}" for k, v in self.element.attributes.items()])
+            text = f"<{self.element.tag}>"
+            if attrs:
+                text += f" ({attrs})"
+            if self.element.content:
+                text += f": {self.element.content[:30]}..."
         self.setText(0, text)
 
-class WebElementEditor(QMainWindow):
+class HTMLEditor(QMainWindow):
     def __init__(self):
         super().__init__()
         self.current_element = None
         self.elements = []
+        self.html_file = "html.txt"  # 要读取的文件名
         self.init_ui()
+        self.load_html_file()  # 初始化时读取文件
     
     def init_ui(self):
-        self.setWindowTitle("网页元素编辑器 - PyQt5")
+        self.setWindowTitle("HTML文件编辑器")
         self.setGeometry(100, 100, 1200, 700)
         
         # 中央部件
@@ -79,7 +238,7 @@ class WebElementEditor(QMainWindow):
         left_layout = QVBoxLayout(left_panel)
         
         self.element_tree = QTreeWidget()
-        self.element_tree.setHeaderLabel("网页元素结构")
+        self.element_tree.setHeaderLabel("HTML元素结构")
         self.element_tree.itemClicked.connect(self.on_element_selected)
         left_layout.addWidget(self.element_tree)
         
@@ -156,17 +315,17 @@ class WebElementEditor(QMainWindow):
         bottom_widget = QWidget()
         bottom_layout = QHBoxLayout(bottom_widget)
         
-        self.export_html_btn = QPushButton("导出HTML")
-        self.export_html_btn.clicked.connect(self.export_html)
-        bottom_layout.addWidget(self.export_html_btn)
+        self.save_btn = QPushButton("保存到html.txt")
+        self.save_btn.clicked.connect(self.save_html_file)
+        bottom_layout.addWidget(self.save_btn)
         
-        self.import_json_btn = QPushButton("导入JSON")
-        self.import_json_btn.clicked.connect(self.import_json)
-        bottom_layout.addWidget(self.import_json_btn)
+        self.reload_btn = QPushButton("重新加载")
+        self.reload_btn.clicked.connect(self.reload_html_file)
+        bottom_layout.addWidget(self.reload_btn)
         
-        self.export_json_btn = QPushButton("导出JSON")
-        self.export_json_btn.clicked.connect(self.export_json)
-        bottom_layout.addWidget(self.export_json_btn)
+        self.export_btn = QPushButton("导出HTML")
+        self.export_btn.clicked.connect(self.export_html)
+        bottom_layout.addWidget(self.export_btn)
         
         self.clear_btn = QPushButton("清空所有")
         self.clear_btn.clicked.connect(self.clear_all)
@@ -176,20 +335,100 @@ class WebElementEditor(QMainWindow):
         
         # 状态栏
         self.statusBar().showMessage("就绪")
-        
-        # 添加示例数据
-        self.add_example_elements()
     
-    def add_example_elements(self):
-        """添加示例元素"""
-        root = WebElement("div", attributes={"class": "container"})
-        header = WebElement("h1", "欢迎使用网页编辑器")
-        paragraph = WebElement("p", "这是一个示例段落。")
-        link = WebElement("a", "点击这里", {"href": "https://example.com", "class": "link"})
+    def create_default_html(self):
+        """创建默认HTML内容"""
+        return """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>新建网页</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; }
+        h1 { color: #333; }
+        p { line-height: 1.6; }
+        a { color: #0066cc; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>欢迎使用HTML编辑器</h1>
+        <p>这是一个新建的HTML文件。</p>
+        <p>您可以在此编辑HTML代码。</p>
+        <p>示例链接: <a href="https://example.com">点击这里</a></p>
+    </div>
+</body>
+</html>"""
+    
+    def load_html_file(self):
+        """读取html.txt文件并解析HTML内容"""
+        try:
+            if os.path.exists(self.html_file):
+                with open(self.html_file, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                self.statusBar().showMessage(f"已从 {self.html_file} 加载HTML文件")
+            else:
+                # 文件不存在，创建默认HTML
+                html_content = self.create_default_html()
+                with open(self.html_file, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                self.statusBar().showMessage(f"已创建 {self.html_file} 并加载默认HTML")
+            
+            # 解析HTML
+            parser = HTMLParser()
+            self.elements = parser.parse(html_content)
+            
+            # 刷新显示
+            self.refresh_tree()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"读取/解析文件失败: {str(e)}")
+            # 创建默认元素
+            self.elements = []
+            self.refresh_tree()
+    
+    def reload_html_file(self):
+        """重新加载html.txt文件"""
+        reply = QMessageBox.question(self, "确认", "重新加载会丢失未保存的更改，确定要继续吗？",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.load_html_file()
+    
+    def save_html_file(self):
+        """保存当前编辑的内容到html.txt"""
+        try:
+            html_content = self.generate_html()
+            with open(self.html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            self.statusBar().showMessage(f"已保存到 {self.html_file}")
+            QMessageBox.information(self, "保存成功", f"文件已保存到 {self.html_file}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存文件失败: {str(e)}")
+    
+    def generate_html(self):
+        """从元素树生成完整的HTML"""
+        html_parts = []
         
-        root.children = [header, paragraph, link]
-        self.elements.append(root)
-        self.refresh_tree()
+        for element in self.elements:
+            html_parts.append(element.to_html())
+        
+        # 如果只有文本元素，包装在body中
+        if all(e.tag == "text" for e in self.elements):
+            body_content = "\n".join([e.to_html() for e in self.elements])
+            return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>生成的网页</title>
+</head>
+<body>
+{body_content}
+</body>
+</html>"""
+        
+        return "\n".join(html_parts)
     
     def refresh_tree(self):
         """刷新元素树"""
@@ -211,16 +450,26 @@ class WebElementEditor(QMainWindow):
     def on_element_selected(self, item):
         """元素被选中"""
         self.current_element = item.element
-        self.tag_edit.setText(self.current_element.tag)
-        self.content_edit.setText(self.current_element.content)
         
-        # 更新属性表格
-        self.attr_table.setRowCount(0)
-        for key, value in self.current_element.attributes.items():
-            row = self.attr_table.rowCount()
-            self.attr_table.insertRow(row)
-            self.attr_table.setItem(row, 0, QTableWidgetItem(key))
-            self.attr_table.setItem(row, 1, QTableWidgetItem(value))
+        if self.current_element.tag == "text":
+            # 文本节点
+            self.tag_edit.setText("text")
+            self.tag_edit.setEnabled(False)
+            self.content_edit.setText(self.current_element.content)
+            self.attr_table.setRowCount(0)
+        else:
+            # HTML元素节点
+            self.tag_edit.setText(self.current_element.tag)
+            self.tag_edit.setEnabled(True)
+            self.content_edit.setText(self.current_element.content)
+            
+            # 更新属性表格
+            self.attr_table.setRowCount(0)
+            for key, value in self.current_element.attributes.items():
+                row = self.attr_table.rowCount()
+                self.attr_table.insertRow(row)
+                self.attr_table.setItem(row, 0, QTableWidgetItem(key))
+                self.attr_table.setItem(row, 1, QTableWidgetItem(str(value)))
     
     def add_element(self):
         """添加新元素"""
@@ -282,8 +531,8 @@ class WebElementEditor(QMainWindow):
     
     def add_attribute(self):
         """添加属性"""
-        if not self.current_element:
-            QMessageBox.warning(self, "警告", "请先选择一个元素")
+        if not self.current_element or self.current_element.tag == "text":
+            QMessageBox.warning(self, "警告", "请先选择一个HTML元素（文本节点不能添加属性）")
             return
         
         key, ok1 = QInputDialog.getText(self, "添加属性", "属性名:")
@@ -300,7 +549,7 @@ class WebElementEditor(QMainWindow):
     
     def remove_attribute(self):
         """删除属性"""
-        if not self.current_element:
+        if not self.current_element or self.current_element.tag == "text":
             return
         
         selected = self.attr_table.selectedItems()
@@ -316,57 +565,43 @@ class WebElementEditor(QMainWindow):
         if not self.current_element:
             return
         
-        self.current_element.tag = self.tag_edit.text()
-        self.current_element.content = self.content_edit.toPlainText()
-        
-        # 更新属性
-        self.current_element.attributes = {}
-        for row in range(self.attr_table.rowCount()):
-            key_item = self.attr_table.item(row, 0)
-            value_item = self.attr_table.item(row, 1)
-            if key_item and value_item:
-                self.current_element.attributes[key_item.text()] = value_item.text()
+        if self.current_element.tag == "text":
+            # 更新文本内容
+            self.current_element.content = self.content_edit.toPlainText()
+        else:
+            # 更新HTML元素
+            new_tag = self.tag_edit.text()
+            if new_tag and new_tag != self.current_element.tag:
+                self.current_element.tag = new_tag
+            
+            self.current_element.content = self.content_edit.toPlainText()
+            
+            # 更新属性
+            self.current_element.attributes = {}
+            for row in range(self.attr_table.rowCount()):
+                key_item = self.attr_table.item(row, 0)
+                value_item = self.attr_table.item(row, 1)
+                if key_item and value_item:
+                    self.current_element.attributes[key_item.text()] = value_item.text()
         
         self.refresh_tree()
         self.statusBar().showMessage("元素已更新")
     
     def update_html_preview(self):
         """更新HTML预览"""
-        html = "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <title>生成的网页</title>\n</head>\n<body>\n"
-        for element in self.elements:
-            html += element.to_html(1) + "\n"
-        html += "</body>\n</html>"
+        html = self.generate_html()
         self.html_preview.setText(html)
     
     def export_html(self):
-        """导出HTML文件"""
+        """导出为单独的HTML文件"""
         filename, _ = QFileDialog.getSaveFileName(self, "导出HTML", "", "HTML文件 (*.html)")
         if filename:
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(self.html_preview.toPlainText())
-            self.statusBar().showMessage(f"HTML已导出到 {filename}")
-    
-    def import_json(self):
-        """导入JSON文件"""
-        filename, _ = QFileDialog.getOpenFileName(self, "导入JSON", "", "JSON文件 (*.json)")
-        if filename:
             try:
-                with open(filename, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                self.elements = [WebElement.from_dict(item) for item in data]
-                self.refresh_tree()
-                self.statusBar().showMessage(f"已从 {filename} 导入")
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(self.generate_html())
+                self.statusBar().showMessage(f"HTML已导出到 {filename}")
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"导入失败: {str(e)}")
-    
-    def export_json(self):
-        """导出JSON文件"""
-        filename, _ = QFileDialog.getSaveFileName(self, "导出JSON", "", "JSON文件 (*.json)")
-        if filename:
-            data = [element.to_dict() for element in self.elements]
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            self.statusBar().showMessage(f"JSON已导出到 {filename}")
+                QMessageBox.critical(self, "错误", f"导出失败: {str(e)}")
     
     def clear_all(self):
         """清空所有元素"""
@@ -379,7 +614,7 @@ class WebElementEditor(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    editor = WebElementEditor()
+    editor = HTMLEditor()
     editor.show()
     sys.exit(app.exec_())
 
