@@ -1,7 +1,7 @@
 # Py-To-res
 ## 依赖
 ```python
-pip install requests beautifulsoup4 pillow
+pip install requests beautifulsoup4 pillow pygame pafy youtube-dl
 ```
 ## 1. 网页文字提取功能
 
