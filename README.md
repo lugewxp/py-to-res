@@ -1,8 +1,10 @@
-# Py-To-res V3.0
+# Py-To-res V3.5
 ## 依赖
 ```python
 pip install requests beautifulsoup4 pillow pafy youtube-dl
 ```
+## 加上了网页编辑功能（html edit .py），要了我好久时间
+
 ## 1. 网页文字提取功能
 
 #### 从任意网页URL中提取纯文字内容，使用BeautifulSoup解析HTML，移除脚本、样式等非内容标签，显示干净、格式化的纯文本内容，快速获取文章内容、博客文字、新闻正文等
