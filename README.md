@@ -1,4 +1,4 @@
-# Py-To-res
+# Py-To-res V3.0
 ## 依赖
 ```python
 pip install requests beautifulsoup4 pillow pygame pafy youtube-dl
