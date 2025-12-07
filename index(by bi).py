@@ -1,11 +1,3 @@
-"""
-网页内容提取器 - 完整增强版 v5.0
-功能：提取网页文本、图片、视频，支持HTML源码查看与保存，URL自动补全，HTTPS/HTTP自动切换
-版本：v5.0
-作者：合并2改.py和4.0.py的所有功能
-"""
-
-# ============================ 导入必要的库 ============================
 import requests  # 用于发送HTTP请求
 from bs4 import BeautifulSoup  # 用于解析HTML
 import tkinter as tk  # GUI库
@@ -20,9 +12,6 @@ import webbrowser  # 打开浏览器
 import tempfile  # 临时文件处理
 import subprocess  # 运行外部程序
 import sys  # 系统相关功能
-
-
-# ============================ URL验证和修复函数 ============================
 def validate_and_fix_url(url):
     """
     验证URL格式，如果没有协议前缀则自动添加https://
@@ -47,8 +36,6 @@ def validate_and_fix_url(url):
     
     return url
 
-
-# ============================ 主应用程序类 ============================
 class WebContentExtractor:
     """
     网页内容提取器主类 v5.0
@@ -83,7 +70,7 @@ class WebContentExtractor:
         # 创建主窗口
         self.root = tk.Tk()
         self.root.title("网页内容提取器 v5.0 - 完整增强版")
-        self.root.geometry("1200x900")
+        self.root.geometry("800x600")
         
         # 创建主框架
         frame = ttk.Frame(self.root, padding="10")
@@ -147,7 +134,7 @@ class WebContentExtractor:
         self.status_label = ttk.Label(frame, text="就绪")
         self.status_label.pack(pady=5)
         
-        # ========== 使用说明 ==========
+
         instructions = """
         使用说明 v5.0:
         1. 输入网页URL (支持输入域名如: baidu.com，系统会自动补全https://)
