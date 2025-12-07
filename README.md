@@ -1,4 +1,4 @@
-# Py-To-res V3.5
+# Py-To-res V4.0
 ## 依赖
 ```python
 pip install requests beautifulsoup4 pillow pafy youtube-dl pyqt5
