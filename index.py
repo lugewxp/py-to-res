@@ -23,7 +23,7 @@ class WebContentExtractor:
     
     def setup_ui(self):
         self.root = tk.Tk()
-        self.root.title("网页内容提取器 v3.5")
+        self.root.title("网页内容提取器 v4.0")
         self.root.geometry("1200x900")
         
         frame = ttk.Frame(self.root, padding="10")
