@@ -1,7 +1,7 @@
 # Py-To-res V3.5
 ## 依赖
 ```python
-pip install requests beautifulsoup4 pillow pafy youtube-dl
+pip install requests beautifulsoup4 pillow pafy youtube-dl pyqt5
 ```
 ## 加上了网页编辑功能（html edit .py），要了我好久时间
 
